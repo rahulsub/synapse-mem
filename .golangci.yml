@@ -1,0 +1,55 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - nolintlint
+    - bodyclose
+    - copyloopvar
+    - durationcheck
+    - errcheck
+    - errorlint
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - noctx
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unused
+  settings:
+    errcheck:
+      exclude-functions:
+        # Writes to stdout/stderr and to hashes; nothing useful to do on failure.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # Closing read cursors and rolling back an already-failed transaction.
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+    gosec:
+      excludes:
+        - G104 # unhandled errors: errcheck covers these, with its exclusions
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    rules:
+      # Tests set up fixtures freely; errors there fail the test anyway.
+      - path: _test\.go
+        linters: [errcheck, gosec, noctx, rowserrcheck, sqlclosecheck]
+      # The store is a local SQLite file; threading contexts through every
+      # query buys nothing. noctx still checks HTTP requests.
+      - linters: [noctx]
+        text: "database/sql"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

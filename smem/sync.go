@@ -240,13 +240,13 @@ func propagationRoot(ev Event) string {
 	switch ev.Type {
 	case evMemoryInvalidated, evMemoryRetracted, evAssumptionBroken, evDecisionReverted:
 		var p statusChange
-		json.Unmarshal(ev.Payload, &p)
+		_ = json.Unmarshal(ev.Payload, &p) // unreadable: no root, nothing to propagate
 		return p.ID
 	case evMemoryAsserted, evDecisionMade:
 		var p struct {
 			Supersedes string `json:"supersedes"`
 		}
-		json.Unmarshal(ev.Payload, &p)
+		_ = json.Unmarshal(ev.Payload, &p) // unreadable: nothing superseded
 		return p.Supersedes
 	}
 	return ""
@@ -319,20 +319,20 @@ func (r DirRemote) feedPath(replica string) string {
 }
 
 func (r DirRemote) readFeed(path string) ([]Event, bool, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // a feed in the configured remote; its content is verified on import
 	if os.IsNotExist(err) {
 		return nil, false, nil
 	} else if err != nil {
 		return nil, false, err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // read-only
 	return readEvents(f)
 }
 
 // repairTail truncates a torn last line left by an interrupted push. Only
 // the feed's own replica writes to it, so this is safe.
 func repairTail(path string) error {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // our own feed in the configured remote
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -363,7 +363,7 @@ func (e *Engine) Push(r DirRemote) (int, error) {
 	if err != nil || len(evs) == 0 {
 		return 0, err
 	}
-	if err := os.MkdirAll(filepath.Dir(r.feedPath(e.replica)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(r.feedPath(e.replica)), 0o755); err != nil { //nolint:gosec // a shared remote; peers must read it
 		return 0, err
 	}
 	var buf strings.Builder
@@ -373,18 +373,18 @@ func (e *Engine) Push(r DirRemote) (int, error) {
 			return 0, err
 		}
 	}
-	f, err := os.OpenFile(r.feedPath(e.replica), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(r.feedPath(e.replica), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644) //nolint:gosec // as above
 	if err != nil {
 		return 0, err
 	}
 	// One write, then sync: a reader sees whole lines or a torn tail, which
 	// it skips and the next push repairs.
 	if _, err := f.WriteString(buf.String()); err != nil {
-		f.Close()
+		_ = f.Close() // the write error is the one to report
 		return 0, err
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close() // as above
 		return 0, err
 	}
 	return len(evs), f.Close()
@@ -437,7 +437,7 @@ func (e *Engine) AddRemote(name, dir string, pullOnly bool) error {
 		return err
 	}
 	if !pullOnly {
-		if err := os.MkdirAll(filepath.Join(abs, "feeds"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(abs, "feeds"), 0o755); err != nil { //nolint:gosec // a shared remote
 			return err
 		}
 	}

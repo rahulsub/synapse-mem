@@ -61,7 +61,7 @@ func loadKey(dir, actor string) (ed25519.PrivateKey, error) {
 // loadOrCreateKey returns the actor's signing key, generating one on first use.
 func loadOrCreateKey(dir, actor string) (ed25519.PrivateKey, error) {
 	path := filepath.Join(dir, unsafeName.ReplaceAllString(actor, "_")+".ed25519")
-	if b, err := os.ReadFile(path); err == nil {
+	if b, err := os.ReadFile(path); err == nil { //nolint:gosec // the key directory, with a sanitized actor name
 		seed, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(b)))
 		if err != nil || len(seed) != ed25519.SeedSize {
 			return nil, fmt.Errorf("corrupt key file %s", path)
@@ -77,15 +77,19 @@ func loadOrCreateKey(dir, actor string) (ed25519.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // as above
 	if err != nil {
 		if os.IsExist(err) { // another process won the race; use its key
 			return loadOrCreateKey(dir, actor)
 		}
 		return nil, err
 	}
-	defer f.Close()
 	if _, err := f.WriteString(base64.StdEncoding.EncodeToString(priv.Seed()) + "\n"); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	// A failed close can mean the key never reached the disk.
+	if err := f.Close(); err != nil {
 		return nil, err
 	}
 	return priv, nil

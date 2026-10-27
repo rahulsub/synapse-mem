@@ -3,6 +3,7 @@ package smem
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -97,7 +98,7 @@ func flagsFrom(evs []Event) []Flag {
 			continue
 		}
 		var p statusChange
-		json.Unmarshal(ev.Payload, &p)
+		_ = json.Unmarshal(ev.Payload, &p) // our own event, just written
 		out = append(out, Flag{Subject: p.ID, Status: "suspect", Cause: p.Cause, Root: p.Root, Reason: p.Reason})
 	}
 	return out
@@ -331,7 +332,7 @@ func (w *wtx) dependents(id string) ([]string, error) {
 // Memory loads one memory by id.
 func (e *Engine) Memory(id string) (Memory, error) {
 	m, err := scanMemory(e.db.QueryRow(`SELECT `+memoryCols+` FROM memories WHERE id = ?`, id))
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return m, fmt.Errorf("no such memory %s", id)
 	}
 	return m, err

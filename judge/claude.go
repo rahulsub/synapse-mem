@@ -171,7 +171,7 @@ func (c *Claude) Ask(ctx context.Context, req Request) (*Result, error) {
 	if err := json.Unmarshal([]byte(text), &raw); err != nil {
 		return nil, fmt.Errorf("claude: unparseable answer")
 	}
-	res := &Result{Judge: c.Name(), Model: string(resp.Model), Answers: map[string]Answer{},
+	res := &Result{Judge: c.Name(), Model: resp.Model, Answers: map[string]Answer{},
 		Usage: Usage{InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens}}
 	for _, q := range req.Questions {
 		ca, ok := raw[q.ID]

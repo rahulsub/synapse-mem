@@ -320,7 +320,7 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 func (c *Config) overlay(path string, project bool) error {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // the config files are the point
 	if os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
@@ -486,7 +486,7 @@ func (e *Engine) configureBeads() error {
 	prefixes := append([]string(nil), e.Policy.Beads.Prefixes...)
 	if e.Policy.Beads.Detect {
 		root := filepath.Dir(filepath.Dir(e.path))
-		if b, err := os.ReadFile(filepath.Join(root, ".beads", "config.yaml")); err == nil {
+		if b, err := os.ReadFile(filepath.Join(root, ".beads", "config.yaml")); err == nil { //nolint:gosec // fixed path in the project
 			if m := beadsPrefixLine.FindSubmatch(b); m != nil {
 				prefixes = append(prefixes, string(m[1]))
 			}

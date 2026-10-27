@@ -199,7 +199,7 @@ func (e *Engine) commitTrace(t *Trace, sha string) error {
 			ids = append(ids, a.DecisionID)
 		}
 	}
-	if out, err := exec.Command("git", "show", "-s", "--format=%B", sha).Output(); err == nil {
+	if out, err := exec.Command("git", "show", "-s", "--format=%B", sha, "--").Output(); err == nil { //nolint:gosec,noctx // sha matched hexRef
 		for _, m := range decisionTrailer.FindAllStringSubmatch(string(out), -1) {
 			ids = append(ids, m[1])
 		}
@@ -226,7 +226,7 @@ func (e *Engine) decisionTrace(id string) (*DecisionTrace, error) {
 		return nil, err
 	}
 	dt := &DecisionTrace{Decision: d}
-	json.Unmarshal(d.Snapshot, &dt.Snapshot)
+	_ = json.Unmarshal(d.Snapshot, &dt.Snapshot) // projected from a verified event; empty if absent
 	if dt.Rejected, err = selectAll(e.db, func(s scanner) (Option, error) {
 		var o Option
 		return o, s.Scan(&o.Option, &o.Reason)
@@ -304,17 +304,20 @@ func (e *Engine) memoryTrace(id string) (*MemoryTrace, error) {
 	if mt.Dependents, err = e.links(`SELECT src, type FROM edges WHERE dst = ? AND type = 'derived_from' ORDER BY at`, id); err != nil {
 		return nil, err
 	}
-	rows, err := e.db.Query(`SELECT signal, COUNT(*) FROM accesses WHERE memory_id = ? GROUP BY signal`, id)
+	type count struct {
+		signal string
+		n      int
+	}
+	counts, err := selectAll(e.db, func(s scanner) (count, error) {
+		var c count
+		return c, s.Scan(&c.signal, &c.n)
+	}, `SELECT signal, COUNT(*) FROM accesses WHERE memory_id = ? GROUP BY signal`, id)
 	if err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var s string
-		var n int
-		rows.Scan(&s, &n)
-		mt.Signals[s] = n
+	for _, c := range counts {
+		mt.Signals[c.signal] = c.n
 	}
-	rows.Close()
 	if mt.Judgments, err = e.judgments(id); err != nil {
 		return nil, err
 	}
@@ -361,15 +364,15 @@ func (e *Engine) label(id string) string {
 	var s string
 	switch kind, _, _ := strings.Cut(id, "-"); kind {
 	case "mem":
-		e.db.QueryRow(`SELECT '[' || status || '] ' || content FROM memories WHERE id = ?`, id).Scan(&s)
+		_ = e.db.QueryRow(`SELECT '[' || status || '] ' || content FROM memories WHERE id = ?`, id).Scan(&s) // a missing record gets no label
 	case "dec":
-		e.db.QueryRow(`SELECT '[' || status || '] ' || question || ' → ' || choice FROM decisions WHERE id = ?`, id).Scan(&s)
+		_ = e.db.QueryRow(`SELECT '[' || status || '] ' || question || ' → ' || choice FROM decisions WHERE id = ?`, id).Scan(&s) // a missing record gets no label
 	case "src":
-		e.db.QueryRow(`SELECT kind || ': ' || ref FROM sources WHERE id = ?`, id).Scan(&s)
+		_ = e.db.QueryRow(`SELECT kind || ': ' || ref FROM sources WHERE id = ?`, id).Scan(&s) // a missing record gets no label
 	case "rule":
-		e.db.QueryRow(`SELECT '[' || status || '] ' || text FROM rules WHERE id = ?`, id).Scan(&s)
+		_ = e.db.QueryRow(`SELECT '[' || status || '] ' || text FROM rules WHERE id = ?`, id).Scan(&s) // a missing record gets no label
 	case "fail":
-		e.db.QueryRow(`SELECT '[' || label || '] ' || summary FROM failures WHERE id = ?`, id).Scan(&s)
+		_ = e.db.QueryRow(`SELECT '[' || label || '] ' || summary FROM failures WHERE id = ?`, id).Scan(&s) // a missing record gets no label
 	}
 	return oneLine(s, 120)
 }

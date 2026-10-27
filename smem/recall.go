@@ -101,8 +101,10 @@ func (w *wtx) repeatsRecentRecall(p recallPayload) (bool, error) {
 		return false, err
 	}
 	var last recallPayload
-	if json.Unmarshal([]byte(payload), &last) != nil || last.Query != p.Query || last.Injected != p.Injected ||
-		len(last.Results) != len(p.Results) {
+	if err := json.Unmarshal([]byte(payload), &last); err != nil {
+		return false, nil //nolint:nilerr // an unreadable earlier recall just isn't a duplicate
+	}
+	if last.Query != p.Query || last.Injected != p.Injected || len(last.Results) != len(p.Results) {
 		return false, nil
 	}
 	for i := range p.Results {
@@ -219,7 +221,7 @@ func (e *Engine) score(q RecallQuery) ([]Scored, error) {
 		where = append(where, `id IN (`+placeholders(len(ids))+`)`)
 		args = append(args, anys(ids)...)
 	}
-	rows, err := e.db.Query(`SELECT `+memoryCols+` FROM memories WHERE `+strings.Join(where, " AND "), args...)
+	rows, err := e.db.Query(`SELECT `+memoryCols+` FROM memories WHERE `+strings.Join(where, " AND "), args...) //nolint:gosec // clauses are constants; values are bound
 	mems, err := queryAll(rows, err, scanMemory)
 	if err != nil || len(mems) == 0 {
 		return nil, err
@@ -245,21 +247,21 @@ func (e *Engine) score(q RecallQuery) ([]Scored, error) {
 	for i, m := range mems {
 		memIDs[i] = m.ID
 	}
-	arows, err := e.db.Query(`SELECT memory_id, at, signal, weight FROM accesses WHERE at <= ? AND memory_id IN (`+
-		placeholders(len(memIDs))+`)`, append([]any{known}, anys(memIDs)...)...)
+	type memAccess struct {
+		id string
+		access
+	}
+	accs, err := selectAll(e.db, func(s scanner) (memAccess, error) {
+		var a memAccess
+		return a, s.Scan(&a.id, &a.at, &a.signal, &a.weight)
+	}, `SELECT memory_id, at, signal, weight FROM accesses WHERE at <= ? AND memory_id IN (`+placeholders(len(memIDs))+`)`,
+		append([]any{known}, anys(memIDs)...)...)
 	if err != nil {
 		return nil, err
 	}
-	for arows.Next() {
-		var id string
-		var a access
-		if err := arows.Scan(&id, &a.at, &a.signal, &a.weight); err != nil {
-			arows.Close()
-			return nil, err
-		}
-		byMem[id] = append(byMem[id], a)
+	for _, a := range accs {
+		byMem[a.id] = append(byMem[a.id], a.access)
 	}
-	arows.Close()
 
 	out := make([]Scored, 0, len(mems))
 	for _, m := range mems {
@@ -368,7 +370,10 @@ func (e *Engine) idleGaps(now int64) ([][2]int64, error) {
 	defer e.gaps.mu.Unlock()
 	if e.gaps.head != head.Int64 {
 		// Extend from where the cache left off: only new events are read.
-		rows, err := e.db.Query(`SELECT at FROM events WHERE replica = ? AND rseq > ? ORDER BY rseq`, e.replica, e.gaps.head)
+		ats, err := selectAll(e.db, func(s scanner) (int64, error) {
+			var at int64
+			return at, s.Scan(&at)
+		}, `SELECT at FROM events WHERE replica = ? AND rseq > ? ORDER BY rseq`, e.replica, e.gaps.head)
 		if err != nil {
 			return nil, err
 		}
@@ -376,18 +381,12 @@ func (e *Engine) idleGaps(now int64) ([][2]int64, error) {
 		if n := len(gaps); n > 0 {
 			gaps, prev = gaps[:n-1], gaps[n-1][0]
 		}
-		for rows.Next() {
-			var at int64
-			if err := rows.Scan(&at); err != nil {
-				rows.Close()
-				return nil, err
-			}
+		for _, at := range ats {
 			if prev != 0 && at-prev > idle {
 				gaps = append(gaps, [2]int64{prev + idle, at})
 			}
 			prev = at
 		}
-		rows.Close()
 		e.gaps.head, e.gaps.gaps = head.Int64, append(gaps, [2]int64{prev, 0})
 	}
 	gaps := e.gaps.gaps[:len(e.gaps.gaps)-1]

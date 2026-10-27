@@ -171,7 +171,7 @@ func (j *Jev) post(ctx context.Context, body []byte) ([]byte, error) {
 			return 0, "", err
 		}
 		b, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
+		_ = resp.Body.Close() // fully read
 		if resp.StatusCode != http.StatusOK {
 			return resp.StatusCode, "", fmt.Errorf("status %d", resp.StatusCode)
 		}

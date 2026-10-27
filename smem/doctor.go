@@ -60,7 +60,8 @@ func Doctor(ctx context.Context, e *Engine, cfg *Config, cfgErr error, ping bool
 	add("key dir", keyStatus, "%s", keyDetail)
 	priv, err := loadKey(e.KeyDir, e.Actor)
 	var registered string
-	e.db.QueryRow(`SELECT key_id FROM keys WHERE actor = ? AND replica = ? ORDER BY registered_at DESC LIMIT 1`, e.Actor, e.replica).Scan(&registered)
+	_ = e.db.QueryRow(`SELECT key_id FROM keys WHERE actor = ? AND replica = ? ORDER BY registered_at DESC LIMIT 1`,
+		e.Actor, e.replica).Scan(&registered) // none registered yet is a normal answer
 	switch {
 	case err != nil:
 		add("signing key", "fail", "%v", err)

@@ -81,7 +81,7 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	defer func() {
 		s.wg.Wait()
 		if s.bg != nil {
-			s.bg.Close()
+			_ = s.bg.Close()
 		}
 	}()
 	sc := bufio.NewScanner(in)
@@ -113,7 +113,7 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 			if s.bg == nil { // cloned here, on the loop that owns s.Engine
 				bg, err := s.Engine.Clone()
 				if err != nil {
-					send(response{JSONRPC: "2.0", ID: req.ID, Result: textResult(err.Error(), true)})
+					_ = send(response{JSONRPC: "2.0", ID: req.ID, Result: textResult(err.Error(), true)}) // a dead pipe ends Serve on the next read
 					continue
 				}
 				s.bg = bg
@@ -122,7 +122,7 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 			go func() {
 				defer s.wg.Done()
 				result, rerr := s.runSlow(ctx, t, args, session, actor)
-				send(response{JSONRPC: "2.0", ID: req.ID, Result: result, Error: rerr})
+				_ = send(response{JSONRPC: "2.0", ID: req.ID, Result: result, Error: rerr}) // as above
 			}()
 			continue
 		}
@@ -202,7 +202,7 @@ func (s *Server) handle(ctx context.Context, req request) (any, *rpcError) {
 				Name string `json:"name"`
 			} `json:"clientInfo"`
 		}
-		json.Unmarshal(req.Params, &p)
+		_ = json.Unmarshal(req.Params, &p) // missing or odd params: use the defaults
 		if name := strings.Trim(unsafeActor.ReplaceAllString(strings.ToLower(p.ClientInfo.Name), "-"), "-."); s.ActorFromClient && name != "" {
 			s.Engine.Actor = smem.DefaultActorFor(name)
 		}

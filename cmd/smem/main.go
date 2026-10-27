@@ -169,7 +169,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer e.Close()
+	defer e.Close() //nolint:errcheck // the process exits next
 	if err := e.Configure(cfg); err != nil {
 		return err
 	}
@@ -234,7 +234,7 @@ func hook(path, actorFlag, event string, in smem.HookInput, all bool, budget int
 	if err != nil {
 		return err
 	}
-	defer e.Close()
+	defer e.Close() //nolint:errcheck // the process exits next
 	if err := e.Configure(cfg); err != nil {
 		return err
 	}
@@ -435,7 +435,7 @@ func wireClaudeCode(root, bin string) ([]string, error) {
 	edit := func(rel string, fn func(map[string]any)) error {
 		p := filepath.Join(root, rel)
 		m := map[string]any{}
-		if b, err := os.ReadFile(p); err == nil {
+		if b, err := os.ReadFile(p); err == nil { //nolint:gosec // .mcp.json or .claude/settings.json in the project
 			if err := json.Unmarshal(b, &m); err != nil {
 				return fmt.Errorf("%s: %w", rel, err)
 			}
@@ -447,11 +447,11 @@ func wireClaudeCode(root, bin string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil { //nolint:gosec // the project's .claude directory
 			return err
 		}
 		changed = append(changed, rel)
-		return os.WriteFile(p, append(b, '\n'), 0o644)
+		return os.WriteFile(p, append(b, '\n'), 0o644) //nolint:gosec // project files, committed and shared
 	}
 	obj := func(m map[string]any, k string) map[string]any {
 		v, ok := m[k].(map[string]any)
@@ -1221,7 +1221,7 @@ func (c *cli) importCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer f.Close() //nolint:errcheck // read-only
 		r = f
 	}
 	evs, err := smem.ReadEvents(r)

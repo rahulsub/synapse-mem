@@ -79,7 +79,7 @@ func (r Retry) do(ctx context.Context, judge string, fn func() (int, string, err
 			return &HTTPError{Judge: judge, Status: status, Attempts: attempt, Detail: detail}
 		}
 		// ±25% jitter so agents sharing a seat don't retry in step.
-		wait := delay + time.Duration((rand.Float64()-0.5)*0.5*float64(delay))
+		wait := delay + time.Duration((rand.Float64()-0.5)*0.5*float64(delay)) //nolint:gosec // jitter, not security
 		select {
 		case <-time.After(wait):
 		case <-ctx.Done():

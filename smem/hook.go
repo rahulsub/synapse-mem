@@ -106,7 +106,7 @@ func SpoolToolUse(dbPath string, in HookInput, cfg *Config, includeReadOnly bool
 	rand.Read(rnd)
 	name := fmt.Sprintf("%019d-%d-%s", time.Now().UnixNano(), os.Getpid(), hex.EncodeToString(rnd))
 	tmp := filepath.Join(dir, name+".tmp")
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	if err := os.WriteFile(tmp, b, 0o600); err != nil { //nolint:gosec // dir is the store's spool; name is generated here
 		return err
 	}
 	return os.Rename(tmp, filepath.Join(dir, name+".json"))
@@ -137,7 +137,7 @@ func (e *Engine) DrainSpool() (int, error) {
 			if seen > 0 {
 				continue
 			}
-			b, err := os.ReadFile(path)
+			b, err := os.ReadFile(path) //nolint:gosec // from a glob of the store's own spool directory
 			if err != nil {
 				return err
 			}
@@ -168,7 +168,7 @@ func (e *Engine) DrainSpool() (int, error) {
 	}
 	for _, p := range done {
 		if err := os.Remove(p); err == nil || errors.Is(err, os.ErrNotExist) {
-			e.db.Exec(`DELETE FROM spool_seen WHERE file = ?`, filepath.Base(p))
+			_, _ = e.db.Exec(`DELETE FROM spool_seen WHERE file = ?`, filepath.Base(p)) // a stale marker only costs a lookup
 		}
 	}
 	return n, nil
@@ -317,7 +317,7 @@ func pruneSessions(dir string) {
 	ents, _ := os.ReadDir(dir)
 	for _, ent := range ents {
 		if pid, err := strconv.Atoi(ent.Name()); err == nil && !alive(pid) {
-			os.Remove(filepath.Join(dir, ent.Name()))
+			_ = os.Remove(filepath.Join(dir, ent.Name())) // best-effort cleanup
 		}
 	}
 }
@@ -357,7 +357,7 @@ func parentOf(pid int) int {
 		ppid, _ := strconv.Atoi(f[1])
 		return ppid
 	}
-	out, err := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
+	out, err := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output() //nolint:gosec,noctx // fixed program; pid is an integer
 	if err != nil {
 		return 0
 	}

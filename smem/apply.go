@@ -411,7 +411,7 @@ func orderSensitive(ev Event) bool {
 		// A confirmation changes confidence0, and reconfirm can set it
 		// outright: the two don't commute.
 		var p memorySignal
-		json.Unmarshal(ev.Payload, &p)
+		_ = json.Unmarshal(ev.Payload, &p) // unreadable: no boost, so it commutes
 		return p.Boost > 0
 	case evKeyRegistered, evRecall, evSourceCaptured, evActionRecorded,
 		evJudgmentRecorded, evDecisionApproved, evFailureRecorded, evRuleProposed, evRuleViolated:
@@ -420,7 +420,7 @@ func orderSensitive(ev Event) bool {
 		var p struct {
 			Supersedes string `json:"supersedes"`
 		}
-		json.Unmarshal(ev.Payload, &p)
+		_ = json.Unmarshal(ev.Payload, &p) // unreadable: treated as a plain insert
 		return p.Supersedes != ""
 	}
 	return true

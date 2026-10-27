@@ -123,14 +123,14 @@ func (c *CommandChecker) Check(ctx context.Context, claim Claim) (CheckResult, e
 	if err != nil {
 		return CheckResult{}, err
 	}
-	cmd := exec.CommandContext(ctx, c.Command[0], c.Command[1:]...)
+	cmd := exec.CommandContext(ctx, c.Command[0], c.Command[1:]...) //nolint:gosec // checkers are commands the user configured, local config only
 	cmd.Dir = c.Dir
 	cmd.Env = checkerEnv(c.Env)
 	cmd.Stdin = bytes.NewReader(in)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return CheckResult{}, fmt.Errorf("%v: %s", err, oneLine(Redact(stderr.String()), 200))
+		return CheckResult{}, fmt.Errorf("%w: %s", err, oneLine(Redact(stderr.String()), 200))
 	}
 	var res CheckResult
 	if out := bytes.TrimSpace(stdout.Bytes()); len(out) > 0 {
@@ -627,7 +627,7 @@ func (e *Engine) gatherEvidence(m Memory, pol FactCheckPolicy) ([]Evidence, erro
 			if !hexRef.MatchString(s.Ref) {
 				continue
 			}
-			cmd := exec.Command("git", "show", "--stat", "--format=%H %ad%n%B", s.Ref, "--")
+			cmd := exec.Command("git", "show", "--stat", "--format=%H %ad%n%B", s.Ref, "--") //nolint:gosec,noctx // s.Ref is checked against hexRef above
 			cmd.Dir = root
 			if b, err := cmd.Output(); err == nil {
 				out = append(out, Evidence{ID: s.ID, Kind: "commit", Ref: s.Ref, Text: string(b)})
@@ -776,11 +776,11 @@ func readEvidenceFile(root, ref string, pol EvidencePolicy) (string, error) {
 	if err != nil || !fi.Mode().IsRegular() {
 		return "", errors.New("not a regular file")
 	}
-	f, err := os.Open(real)
+	f, err := os.Open(real) // resolved, confined to the project and checked against the evidence policy above
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // read-only
 	b, err := io.ReadAll(io.LimitReader(f, max(pol.MaxBytes, 1)))
 	return string(b), err
 }
@@ -789,7 +789,7 @@ func readEvidenceFile(root, ref string, pol EvidencePolicy) (string, error) {
 // within one segment and ** matches any number of segments.
 func globMatch(pattern, path string) bool {
 	var b strings.Builder
-	b.WriteString("^")
+	b.WriteString("(?s)^") // a file name may contain a newline; it must not slip past a deny rule
 	for i := 0; i < len(pattern); i++ {
 		c := pattern[i]
 		switch {

@@ -82,7 +82,7 @@ func OpenWith(path string, opts OpenOptions) (*Engine, error) {
 		opts.BusyTimeout = 10 * time.Second
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // a project directory; the store file inside is what matters
 		return nil, err
 	}
 	// In a project's .smem directory, keep the store out of git; the config
@@ -90,7 +90,8 @@ func OpenWith(path string, opts OpenOptions) (*Engine, error) {
 	if filepath.Base(dir) == ".smem" {
 		ignore := filepath.Join(dir, ".gitignore")
 		if _, err := os.Stat(ignore); errors.Is(err, os.ErrNotExist) {
-			os.WriteFile(ignore, []byte("*\n!.gitignore\n!config.json\n"), 0o644)
+			// Best effort, and readable like any other committed file.
+			_ = os.WriteFile(ignore, []byte("*\n!.gitignore\n!config.json\n"), 0o644) //nolint:gosec // a .gitignore is meant to be readable
 		}
 	}
 	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_txlock=immediate", path, opts.BusyTimeout.Milliseconds())
@@ -118,11 +119,11 @@ func OpenWith(path string, opts OpenOptions) (*Engine, error) {
 		time.Sleep(time.Duration(10+attempt*10) * time.Millisecond)
 	}
 	if err != nil {
-		db.Close()
+		_ = db.Close() // already failing; report the first error
 		return nil, err
 	}
 	if err := e.configureBeads(); err != nil {
-		db.Close()
+		_ = db.Close() // already failing; report the first error
 		return nil, err
 	}
 	return e, nil

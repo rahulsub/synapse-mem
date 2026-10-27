@@ -397,7 +397,7 @@ func (w *wtx) justify(p ruleProposed, pol RulesPolicy) (basis, held string, err 
 			return "", "a decision rule needs the decision id", nil
 		}
 		if err := w.require(why.Decision, "dec", "active"); err != nil {
-			return "", err.Error(), nil
+			return "", err.Error(), nil //nolint:nilerr // an inactive decision is a reason to hold the rule, not a failure
 		}
 		return "carries out " + why.Decision, "", nil
 	case "incident":
@@ -452,7 +452,7 @@ func scanRule(s scanner) (Rule, error) {
 	var admitted, retired sql.NullInt64
 	err := s.Scan(&r.ID, &r.Text, &r.Scope, &r.Label, &r.Status, &why, &r.Basis, &r.Held, &r.Source, &proposed,
 		&admitted, &retired, &r.SupersededBy, &r.Violations, &last, &r.Actor)
-	json.Unmarshal([]byte(why), &r.Why)
+	_ = json.Unmarshal([]byte(why), &r.Why) // projected from a verified event; empty if absent
 	r.ProposedAt, r.LastActivity, r.AdmittedAt, r.RetiredAt = fromMs(proposed), fromMs(last), optTime(admitted), optTime(retired)
 	return r, err
 }
@@ -750,11 +750,11 @@ type candidate struct {
 }
 
 func readRuleCandidates(path string) ([]candidate, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // a file the user named to import
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // read-only
 	var out []candidate
 	var cur *candidate
 	flush := func() {
@@ -841,7 +841,7 @@ func (e *Engine) RenderRules(file string, check bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	old, err := os.ReadFile(file)
+	old, err := os.ReadFile(file) //nolint:gosec // the rules file the user configured
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
@@ -869,7 +869,7 @@ func (e *Engine) RenderRules(file string, check bool) (bool, error) {
 	if check {
 		return true, nil
 	}
-	return true, os.WriteFile(file, []byte(next), 0o644)
+	return true, os.WriteFile(file, []byte(next), 0o644) //nolint:gosec // CLAUDE.md is a shared project file
 }
 
 // rulesContext is the rules section of the session context.

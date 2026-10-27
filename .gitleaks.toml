@@ -1,0 +1,11 @@
+# gitleaks: the default rules, plus an allowlist for the fake, secret-shaped
+# values in the redaction tests (they exist to prove redaction works).
+# Anything else it finds fails CI.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "fake secrets in redaction tests"
+condition = "AND"
+paths = ['''_test\.go$''']
+regexes = ['''tsjev_Q7m2Lx9Vb4Np8Rk3Wz6Hc1''', '''tsk_live_9f8e7d6c5b4a''', '''abcdef123456''']
