@@ -159,7 +159,9 @@ idle stretches are cached and extended as new events arrive.
 **Being shown is not being used.** Session-start injection is logged (the
 audit trail shows what the agent was given) but doesn't count as an access,
 unless `context.reinforce` is set. Otherwise memories that are injected
-would stay salient just by being injected.
+would stay salient just by being injected. An agent that injects context
+another way logs it with `recall --injected`: the decision snapshot sees it,
+salience doesn't.
 
 **Contradictions are answered by verification.** Only contradictions since
 the memory was last asserted, reconfirmed or confirmed reduce confidence.

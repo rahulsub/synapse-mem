@@ -64,6 +64,16 @@ Tools: `memory_recall`, `memory_context`, `memory_remember`, `memory_update`,
 `why`, `review`, `factcheck`, `failure_record`, `rule_propose`, `rules_list`.
 Any of them can be turned off with `mcp.disable`.
 
+### Agents that call the CLI
+
+A lone `-` reads content from stdin, so it stays out of the process list;
+`decide` and `action` take their fields as JSON with `--input -`:
+
+```sh
+echo "orders table is append-only" | smem remember - --kind fact
+smem decide --input - < decision.json   # the decision_record arguments
+```
+
 ### Go
 
 ```go

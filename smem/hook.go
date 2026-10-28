@@ -247,17 +247,26 @@ func summarizeTool(input json.RawMessage) string {
 	return oneLine(string(input), 240)
 }
 
-// commitFrom finds the sha in `git commit` output, e.g. "[main 1a2b3c4] msg".
+// commitFrom finds the sha in `git commit` output, e.g. "[main 1a2b3c4] msg",
+// from any agent's shell tool. Only stdout or output is searched, plus Bash's
+// raw response: a file write that mentions git commit can echo lookalike text.
 func commitFrom(tool string, input, response json.RawMessage) string {
-	if tool != "Bash" || !strings.Contains(string(input), "git commit") {
+	if !strings.Contains(string(input), "git commit") {
 		return ""
 	}
-	text := string(response)
+	var text string
 	var r struct {
 		Stdout string `json:"stdout"`
+		Output string `json:"output"`
 	}
-	if json.Unmarshal(response, &r) == nil && r.Stdout != "" {
+	if json.Unmarshal(response, &r) == nil {
 		text = r.Stdout
+		if text == "" {
+			text = r.Output
+		}
+	}
+	if text == "" && tool == "Bash" {
+		text = string(response)
 	}
 	if m := commitLine.FindStringSubmatch(text); m != nil {
 		return m[1]

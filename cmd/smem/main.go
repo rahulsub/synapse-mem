@@ -27,28 +27,31 @@ const usage = `smem: agent memory with decay, decision provenance and a signed a
 
 Usage: smem [--db path] [--actor name] [--session id] <command> [args]
 
+A lone - in place of content reads it from stdin, keeping it out of the process list.
+
 Memory
-  remember <content>       --kind fact|episode|procedure|preference|insight --scope --volatility
+  remember <content|->     --kind fact|episode|procedure|preference|insight --scope --volatility
                            --confidence --valid-from --from id,...
-  supersede <mem> <content> new version of a memory (flags as remember)
+  supersede <mem> <content|-> new version of a memory (flags as remember)
   invalidate <mem>         it stopped being true   --reason --valid-to
   retract <mem>            it was never true       --reason
   reconfirm <mem>          checked, still true     --confidence --note
   signal <mem> used|confirmed|contradicted  --note
-  recall [query]           --kind --scope --limit --as-of --known-at --archived --no-record --explain --json
+  recall [query]           --kind --scope --limit --as-of --known-at --archived --no-record --injected --explain --json
   context                  memories for session start   --budget
   sweep                    archive faded memories   --threshold --idle --dry-run
 
 Decisions and work
   decide                   --question --choice --why --reject "opt|reason" --assume "stmt|check"
                            --used mem,... --evidence ref,... --context mem,... --bead --supersedes --model --prompt-hash
+                           --input - (the decision_record MCP arguments as JSON on stdin, instead of those flags)
   outcome <dec> success|failure|mixed  --note
   approve <dec>            --by --scope --note
   reaffirm <dec>           --note
   revert <dec>             --reason
   assumptions              --status open|held|broken
   assumption break|hold <asm>  --reason
-  action                   --tool --summary --decision --bead --commit
+  action                   --tool --summary --decision --bead --commit   --input - (those fields as JSON on stdin)
   source <ref>             --kind --hash --note
   trailer <dec>            print the commit trailer for a decision
 
@@ -70,10 +73,10 @@ Keys and sync
   import <file|->          verify and merge events
 
 Rules (admitted only with a reason; see docs/CONFIG.md "rules")
-  failure <label> <summary> record a failure   --ref
+  failure <label> <summary|-> record a failure   --ref
   failures                 --label --limit
   rules [list]             --status proposed|active|suspect|retired|rejected (default active) --json
-  rules propose <text>     --why requested|incident|decision --by --quote --transcript --decision
+  rules propose <text|->   --why requested|incident|decision --by --quote --transcript --decision
                            --label --failures fail,... --enforced-by --scope
   rules approve <rule>     a person admits a held proposal   --by --note
   rules reject|retire|reaffirm|violated <rule>...   --reason
@@ -337,6 +340,38 @@ func need(pos []string, n int, what string) error {
 	return nil
 }
 
+// content joins positional args, or reads stdin for a lone "-".
+func (c *cli) content(pos []string) (string, error) {
+	if len(pos) != 1 || pos[0] != "-" {
+		return strings.Join(pos, " "), nil
+	}
+	b, err := io.ReadAll(c.in)
+	return strings.TrimRight(string(b), "\r\n"), err
+}
+
+// input decodes a JSON object on stdin into v for --input -. Its fields
+// replace the flags named in replaces, so giving one of those too is an error.
+func (c *cli) input(fs *flag.FlagSet, src string, v any, replaces ...string) error {
+	if src != "-" {
+		return fmt.Errorf("--input takes - (stdin), not %q", src)
+	}
+	var both []string
+	fs.Visit(func(f *flag.Flag) {
+		if slices.Contains(replaces, f.Name) {
+			both = append(both, "--"+f.Name)
+		}
+	})
+	if len(both) > 0 {
+		return fmt.Errorf("give %s in the --input JSON, not as flags", strings.Join(both, ", "))
+	}
+	dec := json.NewDecoder(c.in)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("--input: %w", err)
+	}
+	return nil
+}
+
 type list []string
 
 func (l *list) String() string { return strings.Join(*l, ",") }
@@ -519,7 +554,9 @@ func (c *cli) remember(args []string) error {
 	if err := finish(); err != nil {
 		return err
 	}
-	in.Content = strings.Join(pos, " ")
+	if in.Content, err = c.content(pos); err != nil {
+		return err
+	}
 	id, err := c.e.Remember(*in)
 	if err != nil {
 		return err
@@ -549,7 +586,9 @@ func (c *cli) supersede(args []string) error {
 			}
 		}
 	}
-	in.Content = strings.Join(pos[1:], " ")
+	if in.Content, err = c.content(pos[1:]); err != nil {
+		return err
+	}
 	id, fl, err := c.e.Supersede(pos[0], *in)
 	if err != nil {
 		return err
@@ -639,6 +678,7 @@ func (c *cli) recall(args []string) error {
 	knownAt := fs.String("known-at", "", "as believed at this time")
 	archived := fs.Bool("archived", false, "include archived memories")
 	noRecord := fs.Bool("no-record", false, "don't record this recall")
+	injected := fs.Bool("injected", false, "record as context shown to the agent: in the next decision's snapshot, not reinforced")
 	explain := fs.Bool("explain", false, "show score breakdown")
 	asJSON := fs.Bool("json", false, "JSON output")
 	pos, err := parse(fs, args)
@@ -646,7 +686,7 @@ func (c *cli) recall(args []string) error {
 		return err
 	}
 	q := smem.RecallQuery{Text: strings.Join(pos, " "), Kinds: kinds, Scope: *scope, Limit: *limit,
-		IncludeArchived: *archived, NoRecord: *noRecord}
+		IncludeArchived: *archived, NoRecord: *noRecord, Injected: *injected}
 	if q.AsOf, err = parseTime(*asOf); err != nil {
 		return err
 	}
@@ -741,8 +781,33 @@ func (c *cli) decide(args []string) error {
 	fs.StringVar(&in.Supersedes, "supersedes", "", "decision this replaces")
 	fs.StringVar(&in.Model, "model", "", "model id")
 	fs.StringVar(&in.PromptHash, "prompt-hash", "", "hash of the prompt")
+	input := fs.String("input", "", "- reads the decision_record MCP arguments as JSON from stdin")
 	if _, err := parse(fs, args); err != nil {
 		return err
+	}
+	if *input != "" {
+		var a struct {
+			Question    string        `json:"question"`
+			Choice      string        `json:"choice"`
+			Why         string        `json:"why"`
+			Rejected    []smem.Option `json:"rejected"`
+			Assumptions []struct {
+				Statement string `json:"statement"`
+				Check     string `json:"check"`
+			} `json:"assumptions"`
+			Used       []string `json:"used"`
+			Evidence   []string `json:"evidence"`
+			Bead       string   `json:"bead"`
+			Supersedes string   `json:"supersedes"`
+		}
+		if err := c.input(fs, *input, &a, "question", "choice", "why", "reject", "assume", "used", "evidence", "bead", "supersedes"); err != nil {
+			return err
+		}
+		in.Question, in.Choice, in.Rationale, in.Rejected = a.Question, a.Choice, a.Why, a.Rejected
+		for _, as := range a.Assumptions {
+			in.Assumptions = append(in.Assumptions, smem.AssumptionInput{Statement: as.Statement, CheckHint: as.Check})
+		}
+		used, evidence, in.Bead, in.Supersedes = a.Used, a.Evidence, a.Bead, a.Supersedes
 	}
 	for _, r := range rejects {
 		o, why := splitPipe(r)
@@ -881,8 +946,22 @@ func (c *cli) action(args []string) error {
 	fs.StringVar(&in.Decision, "decision", "", "decision this carries out")
 	fs.StringVar(&in.Bead, "bead", "", "bead id")
 	fs.StringVar(&in.Commit, "commit", "", "commit sha")
+	input := fs.String("input", "", "- reads these fields as JSON from stdin")
 	if _, err := parse(fs, args); err != nil {
 		return err
+	}
+	if *input != "" {
+		var a struct {
+			Tool     string `json:"tool"`
+			Summary  string `json:"summary"`
+			Decision string `json:"decision"`
+			Bead     string `json:"bead"`
+			Commit   string `json:"commit"`
+		}
+		if err := c.input(fs, *input, &a, "tool", "summary", "decision", "bead", "commit"); err != nil {
+			return err
+		}
+		in.Tool, in.Summary, in.Decision, in.Bead, in.Commit = a.Tool, a.Summary, a.Decision, a.Bead, a.Commit
 	}
 	id, err := c.e.RecordAction(in)
 	if err != nil {
@@ -1435,7 +1514,11 @@ func (c *cli) failure(args []string) error {
 	if err := need(pos, 2, `smem failure <label> "<what went wrong>" [--ref]`); err != nil {
 		return err
 	}
-	id, promoted, err := c.e.RecordFailure(smem.FailureInput{Label: pos[0], Summary: strings.Join(pos[1:], " "), Ref: *ref})
+	summary, err := c.content(pos[1:])
+	if err != nil {
+		return err
+	}
+	id, promoted, err := c.e.RecordFailure(smem.FailureInput{Label: pos[0], Summary: summary, Ref: *ref})
 	if err != nil {
 		return err
 	}
@@ -1532,7 +1615,10 @@ func (c *cli) rules(args []string) error {
 		if err := need(pos, 1, `smem rules propose "<rule>" --why ...`); err != nil {
 			return err
 		}
-		in.Text, in.Why.Failures = strings.Join(pos, " "), failures
+		if in.Text, err = c.content(pos); err != nil {
+			return err
+		}
+		in.Why.Failures = failures
 		return outcome(c.e.ProposeRule(in))
 	case "approve":
 		fs := flag.NewFlagSet("rules approve", flag.ContinueOnError)

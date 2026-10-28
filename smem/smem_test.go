@@ -390,6 +390,36 @@ func TestHookRecordsActionsAndCommits(t *testing.T) {
 	}
 }
 
+func TestCommitLinkageFromAnyShellTool(t *testing.T) {
+	commit := `{"command":"git commit -m 'retry flaky test'"}`
+	for _, tc := range []struct {
+		name, tool, input, response, want string
+	}{
+		{"bash stdout", "Bash", commit, `{"stdout":"[main 3f2a9c1] retry flaky test"}`, "3f2a9c1"},
+		{"bash raw response", "Bash", commit, `"[main 3f2a9c1] retry flaky test"`, "3f2a9c1"},
+		{"other shell, stdout", "shell", commit, `{"stdout":"[main 3f2a9c1] retry flaky test"}`, "3f2a9c1"},
+		{"other shell, output", "terminal", commit, `{"output":"[fix (root-commit) 3f2a9c1] retry","exit_code":0}`, "3f2a9c1"},
+		{"no git commit in input", "terminal", `{"command":"git log -1"}`, `{"output":"[main 3f2a9c1] retry"}`, ""},
+		{"file write echoing commit text", "Write", `{"content":"run git commit"}`,
+			`{"filePath":"notes.md","content":"[main 3f2a9c1] retry"}`, ""},
+	} {
+		if got := commitFrom(tc.tool, json.RawMessage(tc.input), json.RawMessage(tc.response)); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+
+	e := newEngine(t, "agent", start())
+	e.Session = "sess-1"
+	dec, _, err := e.Decide(DecisionInput{Question: "fix flaky test?", Choice: "add retry"})
+	ok(t, err)
+	must[string](t)(e.RecordToolUse(HookInput{SessionID: "sess-1", ToolName: "terminal",
+		ToolInput:    json.RawMessage(commit),
+		ToolResponse: json.RawMessage(`{"output":"[main 3f2a9c1] retry flaky test\n 1 file changed","exit_code":0}`)}, false))
+	if tr := must[*Trace](t)(e.Why("3f2a9c1")); len(tr.Decisions) != 1 || tr.Decisions[0].Decision.ID != dec {
+		t.Fatal("a commit made by any shell tool should trace back to the decision")
+	}
+}
+
 func TestContextIsBudgetedAndAudited(t *testing.T) {
 	c := start()
 	e := newEngine(t, "alice", c)
@@ -403,6 +433,50 @@ func TestContextIsBudgetedAndAudited(t *testing.T) {
 	evs := must[[]Event](t)(e.Events("", evRecall, 1))
 	if len(evs) != 1 {
 		t.Fatal("context injection should be recorded as a recall")
+	}
+}
+
+func TestInjectedRecallIsInViewButNotReinforced(t *testing.T) {
+	c := start()
+	e := newEngine(t, "alice", c)
+	mem := remember(t, e, "fact", "deploys use the release train")
+	retrieved := func() int {
+		t.Helper()
+		var n int
+		ok(t, e.db.QueryRow(`SELECT count(*) FROM accesses WHERE memory_id = ? AND signal = 'retrieved'`, mem).Scan(&n))
+		return n
+	}
+
+	if hits := must[[]Scored](t)(e.Recall(RecallQuery{Text: "deploys", Injected: true})); len(hits) != 1 {
+		t.Fatalf("hits: %v", ids(hits))
+	}
+	evs := must[[]Event](t)(e.Events("", evRecall, 1))
+	var p recallPayload
+	if len(evs) != 1 || json.Unmarshal(evs[0].Payload, &p) != nil || !p.Injected {
+		t.Fatalf("an injected recall should be recorded as injected: %+v", evs)
+	}
+	if n := retrieved(); n != 0 {
+		t.Fatalf("an injected recall must not reinforce, got %d retrievals", n)
+	}
+
+	dec, _, err := e.Decide(DecisionInput{Question: "how to ship?", Choice: "release train"})
+	ok(t, err)
+	var snap Snapshot
+	ok(t, json.Unmarshal(must[Decision](t)(e.Decision(dec)).Snapshot, &snap))
+	if len(snap.Memories) != 1 || snap.Memories[0] != mem || snap.Recall != evs[0].ID {
+		t.Fatalf("the injected recall should be the decision's snapshot: %+v", snap)
+	}
+
+	ok(t, e.Rebuild())
+	if n := retrieved(); n != 0 {
+		t.Fatalf("replay must not reinforce an injected recall, got %d retrievals", n)
+	}
+	must[[]Scored](t)(e.Recall(RecallQuery{Text: "deploys"}))
+	if n := retrieved(); n != 1 {
+		t.Fatalf("a looked-up recall reinforces, got %d retrievals", n)
+	}
+	if _, err := e.Recall(RecallQuery{Text: "deploys", Injected: true, NoRecord: true}); err == nil {
+		t.Fatal("an injected recall that isn't recorded should be refused")
 	}
 }
 

@@ -33,6 +33,10 @@ type RecallQuery struct {
 	// decision show what the agent had in view, and they reinforce the
 	// memories returned, so only skip them for inspection.
 	NoRecord bool
+	// Injected records the recall as context shown to the agent rather than
+	// looked up, as session-start context is: it counts toward the next
+	// decision's snapshot but doesn't reinforce the memories returned.
+	Injected bool
 }
 
 // Scored is a recalled memory with its score breakdown.
@@ -50,6 +54,9 @@ type Scored struct {
 // Recall returns memories ranked by relevance × salience × confidence,
 // restricted to those valid at AsOf as known at KnownAt.
 func (e *Engine) Recall(q RecallQuery) ([]Scored, error) {
+	if q.NoRecord && q.Injected {
+		return nil, errors.New("injected and no-record can't be combined: an injected recall is recorded")
+	}
 	hits, err := e.score(q)
 	if err != nil {
 		return nil, err
@@ -62,7 +69,7 @@ func (e *Engine) Recall(q RecallQuery) ([]Scored, error) {
 		hits = hits[:limit]
 	}
 	if !q.NoRecord && q.AsOf.IsZero() && q.KnownAt.IsZero() && len(hits) > 0 {
-		if err := e.recordRecall(q.Text, hits, false); err != nil {
+		if err := e.recordRecall(q.Text, hits, q.Injected); err != nil {
 			return nil, err
 		}
 	}
