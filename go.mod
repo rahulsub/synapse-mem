@@ -3,7 +3,7 @@ module github.com/rahulsub/synapse-mem
 go 1.27.3
 
 require (
-	github.com/anthropics/anthropic-sdk-go/v2 v2.3.0
+	github.com/anthropics/anthropic-sdk-go/v2 v2.4.0
 	modernc.org/sqlite v1.61.0
 )
 
