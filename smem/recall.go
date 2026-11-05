@@ -1,6 +1,7 @@
 package smem
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kljensen/snowball/english"
 )
 
 // RecallQuery asks for memories relevant to some text.
@@ -35,7 +38,9 @@ type RecallQuery struct {
 	NoRecord bool
 }
 
-// Scored is a recalled memory with its score breakdown.
+// Scored is a recalled memory with its score breakdown. Relevance is the
+// idf-weighted share of the query's terms the memory matches, from 0 to 1,
+// and 1 when there is no query.
 type Scored struct {
 	Memory
 	Score      float64   `json:"score"`
@@ -48,7 +53,8 @@ type Scored struct {
 }
 
 // Recall returns memories ranked by relevance × salience × confidence,
-// restricted to those valid at AsOf as known at KnownAt.
+// restricted to those valid at AsOf as known at KnownAt. Every live memory
+// that shares a non-stopword term with the query is a candidate.
 func (e *Engine) Recall(q RecallQuery) ([]Scored, error) {
 	hits, err := e.score(q)
 	if err != nil {
@@ -117,14 +123,163 @@ func (w *wtx) repeatsRecentRecall(p recallPayload) (bool, error) {
 
 var wordRe = regexp.MustCompile(`[\p{L}\p{N}]+`)
 
-// matchExpr turns free text into an FTS5 query over prefix-matched terms,
-// joined by op ("AND" or "OR").
-func matchExpr(text, op string) string {
-	var terms []string
+// maxQueryTerms bounds the per-term work for very long query text.
+const maxQueryTerms = 64
+
+// queryWords returns the distinct lowercase words of text in first-seen order
+// without stopwords. A query made only of stopwords keeps them.
+func queryWords(text string) []string {
+	var all, kept []string
+	seen := map[string]bool{}
 	for _, w := range wordRe.FindAllString(strings.ToLower(text), -1) {
-		terms = append(terms, `"`+w+`"*`)
+		if seen[w] {
+			continue
+		}
+		seen[w] = true
+		all = append(all, w)
+		if !english.IsStopWord(w) {
+			kept = append(kept, w)
+		}
 	}
-	return strings.Join(terms, " "+op+" ")
+	if len(kept) > 0 {
+		return kept
+	}
+	return all
+}
+
+// liveClauses are the temporal predicates for memories believed valid at asof
+// as known at known.
+func liveClauses(known, asof int64) ([]string, []any) {
+	return []string{
+		`recorded_at <= ?`,
+		`(retracted_at IS NULL OR retracted_at > ?)`,
+		`valid_from <= ?`,
+		// Closed (invalidated or superseded) only counts once we knew about it.
+		`NOT (closed_at IS NOT NULL AND closed_at <= ? AND valid_to <= ?)`,
+	}, []any{known, known, asof, known, asof}
+}
+
+// queryTokens returns the distinct index tokens of words in first-seen order,
+// at most maxQueryTerms. The index tokenizer does the splitting and stemming,
+// so tokens match what the index holds.
+func queryTokens(ctx context.Context, c *sql.Conn, words []string) (toks []string, err error) {
+	for _, stmt := range []string{
+		`CREATE VIRTUAL TABLE IF NOT EXISTS temp.smem_query USING fts5(q, tokenize='porter unicode61')`,
+		`CREATE VIRTUAL TABLE IF NOT EXISTS temp.smem_query_tokens USING fts5vocab(temp, smem_query, instance)`,
+		`DELETE FROM temp.smem_query`,
+	} {
+		if _, err := c.ExecContext(ctx, stmt); err != nil {
+			return nil, err
+		}
+	}
+	defer func() {
+		if _, derr := c.ExecContext(ctx, `DELETE FROM temp.smem_query`); err == nil {
+			err = derr
+		}
+	}()
+	if _, err := c.ExecContext(ctx, `INSERT INTO temp.smem_query (q) VALUES (?)`, strings.Join(words, " ")); err != nil {
+		return nil, err
+	}
+	rows, err := c.QueryContext(ctx, `SELECT term FROM temp.smem_query_tokens ORDER BY "offset"`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	for rows.Next() && len(toks) < maxQueryTerms {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		if !seen[t] {
+			seen[t] = true
+			toks = append(toks, t)
+		}
+	}
+	return toks, rows.Err()
+}
+
+// termWeight is the smoothed idf of a term found in df of n live memories.
+// Absent terms (df 0) use the same formula, so a weight depends only on n and
+// df and never on the other query terms.
+func termWeight(n, df int) float64 { return math.Log(float64(n+1) / float64(df+1)) }
+
+// relevance scores live memories against the query words: the idf-weighted
+// share of the query's terms each memory matches, counted over the memories
+// live at known and asof. It returns relevance by id and the candidate ids in
+// first-seen order.
+func (e *Engine) relevance(words []string, known, asof int64) (map[string]float64, []string, error) {
+	ctx := context.Background()
+	c, err := e.db.Conn(ctx) // the pool has one connection; e.db must not be used until Close
+	if err != nil {
+		return nil, nil, err
+	}
+	defer c.Close() //nolint:errcheck // returns the connection to the pool
+	toks, err := queryTokens(ctx, c, words)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := c.ExecContext(ctx, `CREATE VIRTUAL TABLE IF NOT EXISTS temp.smem_index_tokens USING fts5vocab(main, memories_fts, instance)`); err != nil {
+		return nil, nil, err
+	}
+	live, liveArgs := liveClauses(known, asof)
+	liveSQL := strings.Join(live, " AND ")
+	var n int
+	if err := c.QueryRowContext(ctx, `SELECT count(*) FROM memories WHERE `+liveSQL, liveArgs...).Scan(&n); err != nil {
+		return nil, nil, err
+	}
+
+	// A token's hits are the live memories holding any index token it prefixes,
+	// which is what the FTS5 prefix query for it matches.
+	type term struct {
+		tok  string
+		hits []string
+	}
+	const hitsHead = `SELECT DISTINCT f.id FROM temp.smem_index_tokens v
+		JOIN memories_fts f ON f.rowid = v.doc JOIN memories m ON m.id = f.id
+		WHERE v.term >= ? AND v.term < ? AND `
+	hitsSQL := hitsHead + liveSQL + ` ORDER BY f.id` //nolint:gosec // clauses are constants; values are bound
+	var kept []term
+	for _, tok := range toks {
+		args := append([]any{tok, tok + "\U0010FFFF"}, liveArgs...)
+		rows, err := c.QueryContext(ctx, hitsSQL, args...)
+		hits, err := queryAll(rows, err, func(s scanner) (string, error) {
+			var id string
+			return id, s.Scan(&id)
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		// A prefix-related pair with equal df has identical hits: one signal.
+		if slices.ContainsFunc(kept, func(k term) bool {
+			return len(k.hits) == len(hits) && k.tok != tok && (strings.HasPrefix(k.tok, tok) || strings.HasPrefix(tok, k.tok))
+		}) {
+			continue
+		}
+		kept = append(kept, term{tok, hits})
+	}
+
+	var total float64
+	num := map[string]float64{}
+	var ids []string
+	for _, k := range kept {
+		w := termWeight(n, len(k.hits))
+		total += w
+		for _, id := range k.hits {
+			if _, seen := num[id]; !seen {
+				ids = append(ids, id)
+			}
+			num[id] += w
+		}
+	}
+	rel := make(map[string]float64, len(num))
+	for id, v := range num {
+		rel[id] = 1
+		if total > 0 {
+			rel[id] = v / total
+		}
+	}
+	return rel, ids, nil
 }
 
 // score computes ranked candidates for q without recording anything.
@@ -142,68 +297,18 @@ func (e *Engine) score(q RecallQuery) ([]Scored, error) {
 	}
 	current := q.KnownAt.IsZero() && q.AsOf.IsZero()
 
-	relevance := map[string]float64{}
+	var relevance map[string]float64
 	var ids []string
-	if expr := matchExpr(q.Text, "AND"); expr != "" {
-		// Memories matching every term rank best and keep the candidate set
-		// small; fall back to any term when that finds too few.
-		search := func(expr string) error {
-			rows, err := e.db.Query(`SELECT id, bm25(memories_fts) FROM memories_fts WHERE memories_fts MATCH ?
-				ORDER BY bm25(memories_fts) LIMIT 200`, expr)
-			if err != nil {
-				return err
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var id string
-				var b float64
-				if err := rows.Scan(&id, &b); err != nil {
-					return err
-				}
-				if _, seen := relevance[id]; !seen {
-					relevance[id] = b
-					ids = append(ids, id)
-				}
-			}
-			return rows.Err()
-		}
-		if err := search(expr); err != nil {
+	if words := queryWords(q.Text); len(words) > 0 {
+		if relevance, ids, err = e.relevance(words, known, asof); err != nil {
 			return nil, err
-		}
-		if or := matchExpr(q.Text, "OR"); len(ids) < 20 && or != expr {
-			all := len(ids)
-			if err := search(or); err != nil {
-				return nil, err
-			}
-			for _, id := range ids[all:] {
-				relevance[id] *= 0.5 // any-term matches weigh half as much
-			}
 		}
 		if len(ids) == 0 {
 			return nil, nil
 		}
-		// bm25 is negative; normalize so the best match is 1.
-		best := 0.0
-		for _, b := range relevance {
-			best = math.Min(best, b)
-		}
-		for id, b := range relevance {
-			if best < 0 {
-				relevance[id] = b / best
-			} else {
-				relevance[id] = 1
-			}
-		}
 	}
 
-	where := []string{
-		`recorded_at <= ?`,
-		`(retracted_at IS NULL OR retracted_at > ?)`,
-		`valid_from <= ?`,
-		// Closed (invalidated or superseded) only counts once we knew about it.
-		`NOT (closed_at IS NOT NULL AND closed_at <= ? AND valid_to <= ?)`,
-	}
-	args := []any{known, known, asof, known, asof}
+	where, args := liveClauses(known, asof)
 	if !q.IncludeArchived {
 		where = append(where, `(archived_at IS NULL OR archived_at > ?)`)
 		args = append(args, known)
@@ -218,8 +323,8 @@ func (e *Engine) score(q RecallQuery) ([]Scored, error) {
 	}
 
 	if ids != nil {
-		where = append(where, `id IN (`+placeholders(len(ids))+`)`)
-		args = append(args, anys(ids)...)
+		where = append(where, `id IN (SELECT value FROM json_each(?))`)
+		args = append(args, jsonIDs(ids))
 	}
 	rows, err := e.db.Query(`SELECT `+memoryCols+` FROM memories WHERE `+strings.Join(where, " AND "), args...) //nolint:gosec // clauses are constants; values are bound
 	mems, err := queryAll(rows, err, scanMemory)
@@ -254,8 +359,8 @@ func (e *Engine) score(q RecallQuery) ([]Scored, error) {
 	accs, err := selectAll(e.db, func(s scanner) (memAccess, error) {
 		var a memAccess
 		return a, s.Scan(&a.id, &a.at, &a.signal, &a.weight)
-	}, `SELECT memory_id, at, signal, weight FROM accesses WHERE at <= ? AND memory_id IN (`+placeholders(len(memIDs))+`)`,
-		append([]any{known}, anys(memIDs)...)...)
+	}, `SELECT memory_id, at, signal, weight FROM accesses WHERE at <= ? AND memory_id IN (SELECT value FROM json_each(?))`,
+		known, jsonIDs(memIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -313,6 +418,12 @@ func (e *Engine) score(q RecallQuery) ([]Scored, error) {
 		return out[i].ID < out[j].ID
 	})
 	return out, nil
+}
+
+// jsonIDs encodes ids as one bound JSON array, which has no variable limit.
+func jsonIDs(ids []string) string {
+	b, _ := json.Marshal(ids)
+	return string(b)
 }
 
 // logNow is "now" for queries: the later of the clock and the newest event.

@@ -104,6 +104,10 @@ smem recall orders --as-of 2026-03-01 --known-at 2026-03-02
 smem verify                                 # every hash, link and signature
 ```
 
+Relevance is the idf-weighted share of the query's tokens a memory matches, counted over live memories.
+`relevance` and result membership do not depend on the clock, while `score`, `salience`, `confidence`,
+`activation` and `last_access` do.
+
 ## Sync
 
 ```sh

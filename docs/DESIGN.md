@@ -119,11 +119,24 @@ stored and updated by a background job.
 
 ```
 score      = relevance × salience × confidence
-relevance  = bm25(query) normalized to (0,1]; 1 when there is no query
+relevance  = Σ w_k over the query tokens a memory matches / Σ w_k over all query tokens;
+             1 when there is no query
+w_k        = ln((N + 1) / (df_k + 1))
 salience   = σ(B + 2),  B = ln Σⱼ wⱼ · tⱼ^(−d_kind)        -- ACT-R base-level activation
 confidence = c₀ · ½^(Δt_verified / half_life[volatility]) · ½^(contradictions) · (½ if suspect)
 ```
 
+* Query tokens come from the index tokenizer after Snowball stopwords are
+  dropped (a query of only stopwords keeps them). They are deduplicated by
+  stem and capped at 64. `N` is the number of live memories at the query's
+  `known` and `asof` times and `df_k` the number of those holding the token or
+  a longer one it prefixes, read from `fts5vocab`. Superseded and retracted
+  versions do not count, so a new version of a memory leaves relevance
+  unchanged. A token that no live memory holds uses the same formula at
+  `df = 0`. A prefix-related pair of tokens with equal `df` has identical hits
+  and counts once. Appending a word a memory does not match never raises that
+  memory's relevance. Memories outside the reader's `scopes.read` still count
+  toward `N` and `df`, so relevance does not depend on scope config.
 * `tⱼ` is hours since access j (min 1 minute). ACT-R gives recency,
   frequency and the spacing effect for free.
 * Access weights `wⱼ`: asserted 1, retrieved 0.5, used 1, cited by a decision
@@ -654,7 +667,7 @@ Known costs as the store grows:
    rule can name a check), and link each failure to the session that caused
    it.
 2. **Semantic recall.** Add embeddings (sqlite-vec) as another relevance
-   signal next to bm25; `auth` should find "authentication".
+   signal next to lexical relevance; `auth` should find "authentication".
 3. **Extraction and consolidation.** A pass at session end proposes memories
    and decisions from the transcript, as proposals the agent or user confirms.
    Repeated episodes become facts or procedures, linked by `derived_from`.

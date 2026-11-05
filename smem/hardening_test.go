@@ -247,6 +247,7 @@ func TestNoSingleJudgeActs(t *testing.T) {
 
 	// A checker and a judge count as two.
 	m2 := remember(t, e, "fact", "the api listens on port 8080")
+	remember(t, e, "fact", "the api port is set in the deploy manifest")
 	e.Checkers = []Checker{CheckFunc("port", func(context.Context, Claim) (CheckResult, error) {
 		return CheckResult{Verdict: &Verdict{Label: Contradicted, Reason: "config says 9090"}}, nil
 	})}

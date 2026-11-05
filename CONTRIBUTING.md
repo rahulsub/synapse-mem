@@ -101,7 +101,9 @@ These hold everywhere, and reviews check them:
   (`TestQuarantineUntilTrusted`). Use the helpers in `smem_test.go`
   (`newEngine`, `start()` for a controllable clock, `must`).
 - New dependencies need a good reason. The module currently depends only on
-  the SQLite driver and the Anthropic SDK.
+  the SQLite driver, the Anthropic SDK and the Snowball English stopword list
+  (MIT, no dependencies of its own), which is the canonical list for the Porter
+  stemmer family the index uses.
 
 ## Common changes
 

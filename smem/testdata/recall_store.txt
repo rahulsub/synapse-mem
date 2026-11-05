@@ -1,0 +1,198 @@
+The api service config lives in the api-deploy repository.
+Staging api deploys run every weekday at noon.
+The api database is backed up nightly to cold storage.
+Api alerts route to the api on-call channel.
+The billing service config lives in the billing-deploy repository.
+Staging billing deploys run every weekday at noon.
+The billing database is backed up nightly to cold storage.
+Billing alerts route to the billing on-call channel.
+The search service config lives in the search-deploy repository.
+Staging search deploys run every weekday at noon.
+The search database is backed up nightly to cold storage.
+Search alerts route to the search on-call channel.
+The auth service config lives in the auth-deploy repository.
+Staging auth deploys run every weekday at noon.
+The auth database is backed up nightly to cold storage.
+Auth alerts route to the auth on-call channel.
+The payments service config lives in the payments-deploy repository.
+Staging payments deploys run every weekday at noon.
+The payments database is backed up nightly to cold storage.
+Payments alerts route to the payments on-call channel.
+The notifications service config lives in the notifications-deploy repository.
+Staging notifications deploys run every weekday at noon.
+The notifications database is backed up nightly to cold storage.
+Notifications alerts route to the notifications on-call channel.
+The reporting service config lives in the reporting-deploy repository.
+Staging reporting deploys run every weekday at noon.
+The reporting database is backed up nightly to cold storage.
+Reporting alerts route to the reporting on-call channel.
+The ingest service config lives in the ingest-deploy repository.
+Staging ingest deploys run every weekday at noon.
+The ingest database is backed up nightly to cold storage.
+Ingest alerts route to the ingest on-call channel.
+The gateway service config lives in the gateway-deploy repository.
+Staging gateway deploys run every weekday at noon.
+The gateway database is backed up nightly to cold storage.
+Gateway alerts route to the gateway on-call channel.
+The scheduler service config lives in the scheduler-deploy repository.
+Staging scheduler deploys run every weekday at noon.
+The scheduler database is backed up nightly to cold storage.
+Scheduler alerts route to the scheduler on-call channel.
+The checkout service config lives in the checkout-deploy repository.
+Staging checkout deploys run every weekday at noon.
+The checkout database is backed up nightly to cold storage.
+Checkout alerts route to the checkout on-call channel.
+The inventory service config lives in the inventory-deploy repository.
+Staging inventory deploys run every weekday at noon.
+The inventory database is backed up nightly to cold storage.
+Inventory alerts route to the inventory on-call channel.
+Api outages in staging are triaged by the platform team.
+Billing outages in staging are triaged by the platform team.
+Search outages in staging are triaged by the platform team.
+Auth outages in staging are triaged by the platform team.
+Payments outages in staging are triaged by the platform team.
+Notifications outages in staging are triaged by the platform team.
+Reporting outages in staging are triaged by the platform team.
+Ingest outages in staging are triaged by the platform team.
+Gateway config changes need a second reviewer.
+Scheduler config changes need a second reviewer.
+Checkout config changes need a second reviewer.
+Inventory config changes need a second reviewer.
+The kubeconfig for staging lives in the ops vault.
+Postgres replica lag pages the on-call.
+Postgres major upgrades need a maintenance window.
+The primary Postgres cluster runs in two availability zones.
+Redis is used as the session cache for the web tier.
+Rotate the CI deploy credentials every ninety days.
+Database credentials are stored in the secrets manager.
+Terraform state for production is locked in a remote backend.
+Production deploys freeze on Friday afternoons.
+Load balancer health checks hit the readiness endpoint every ten seconds.
+The staging cluster is rebuilt from scratch every Sunday night.
+Feature flags are managed in the flag service, not in config files.
+Log retention for application logs is thirty days.
+Metrics dashboards live in the observability folder.
+DNS changes take up to an hour to propagate.
+TLS certificates renew automatically thirty days before expiry.
+The message queue retries failed jobs five times before dead lettering.
+Container images are scanned for vulnerabilities on every push.
+Disk usage alerts fire at eighty percent on database hosts.
+Network outages at the data center are announced on the status page.
+Past outages are listed in the incident tracker with their timelines.
+Staging config mirrors production except for smaller instance sizes.
+The config loader reads environment variables before config files.
+Cron jobs for reports run in the scheduler cluster.
+The CDN caches static assets for one week.
+Backups are restored to staging monthly to test recovery.
+Kafka topics are partitioned by customer region.
+The search index is rebuilt nightly from the primary database.
+Elevated error rates on the gateway usually mean an upstream outage.
+SSH access to production requires a short-lived certificate.
+The VPN config is distributed through the device management tool.
+Staging outages do not page anyone outside business hours.
+Rate limits for the public API are one hundred requests per second.
+Service owners are listed in the service catalog.
+Secrets must never be committed to source control.
+Most outages last year came from expired certificates.
+Database migrations run before the application deploy step.
+The build cache is cleared when the base image changes.
+The cafeteria menu changes weekly.
+Office espresso machine outages go to facilities.
+Office wifi outages are reported to the IT helpdesk.
+Printer outages on the third floor go to the IT helpdesk.
+Visitor badges are issued at the front desk.
+Meeting rooms are booked through the calendar system.
+The office closes early on the last Friday of each month.
+Parking passes are renewed every January.
+Lost and found is kept at reception.
+The quiet room on the fourth floor is for focused work only.
+Bike storage is in the basement next to the showers.
+Office supplies are restocked on Mondays.
+The kitchen fridge is cleared out every Friday evening.
+Fire drills happen twice a year without notice.
+The mail room is open from nine to five.
+Desk bookings are required for hybrid workers.
+Heating complaints go to building management.
+The rooftop terrace is open in summer only.
+Coffee beans are ordered from a local roaster.
+Elevator outages are posted on the lobby screens.
+The office config for printers is managed by IT.
+Guest wifi passwords change every month.
+Lockers can be reserved for a week at a time.
+Plants in the office are watered by a service on Wednesdays.
+The wellness room can be booked for thirty minutes at a time.
+Recycling bins are emptied daily.
+Building access cards stop working after ninety days of inactivity.
+The front desk can accept packages up to twenty kilograms.
+Noise complaints go to the workplace team.
+Office power outages trigger the building generator.
+Code review requires approval from one owner of each touched area.
+Pull requests should stay under four hundred lines when possible.
+Postmortems are due within five business days after major outages.
+Incident commanders rotate weekly across senior engineers.
+Release notes are written by the engineer who merged the change.
+Sprint planning happens every other Monday morning.
+Retrospectives focus on process, not on blaming people.
+Design documents are reviewed before implementation starts.
+Hotfixes skip the release train but still need review.
+Expense reports are due by the fifth of each month.
+Vacation requests need two weeks of notice.
+New hires get a buddy for their first month.
+Security training is mandatory every year.
+On-call handoffs happen on Tuesday mornings.
+Customer escalations go through the support lead first.
+Quarterly planning sets three objectives per team.
+Every service must have a runbook before launch.
+Deprecations are announced at least one quarter in advance.
+Architecture decisions are recorded in the decision log.
+Interview feedback is due within one day of the interview.
+Performance reviews happen twice a year.
+Staging must be green before a release is cut.
+Config changes in production go through the change calendar.
+Outages affecting customers need a status page update within fifteen minutes.
+Bug triage happens daily during the stand-up.
+Access reviews for production run every quarter.
+Documentation updates ship with the code that changes behavior.
+Load tests run against staging before major launches.
+Dependency upgrades are batched weekly.
+Hiring loops include a system design interview.
+Team offsites are planned one quarter ahead.
+Budget requests go to the finance partner by mid quarter.
+Open source contributions need legal approval first.
+Pairing sessions are encouraged for onboarding tasks.
+Error budgets are reviewed monthly with product.
+Dana leads the platform team.
+Priya owns the billing roadmap.
+Marco is the security champion for the payments team.
+Lena prefers written updates over meetings.
+Sam is out on parental leave until March.
+Jordan maintains the staging environment.
+Alex is the best contact for database performance questions.
+Riley runs the weekly architecture review.
+Morgan manages the office move next spring.
+Taylor handles vendor contracts for observability tools.
+Chris knows the history of the legacy monolith.
+Nina mentors the new graduate engineers.
+Omar coordinates the incident review meetings.
+Kim prefers async code review over pairing.
+Ben is the facilities contact for the second floor.
+Ava writes the monthly engineering newsletter.
+Leo is learning Go and welcomes small review tasks.
+Zoe approves production access requests.
+Ivan built the original deploy pipeline.
+Maya leads customer support escalations.
+Noah organizes the quarterly hackathon.
+Ella tracks the hiring pipeline for the data team.
+Lucas owns the mobile release process.
+Sofia is the point of contact for compliance audits.
+Hugo runs the internal developer survey.
+Grace leads the search relevance project.
+Ethan prefers to be paged only for customer impacting outages.
+Chloe owns the design system.
+Felix maintains the internal config service.
+Iris coordinates office events and celebrations.
+Oscar answers questions about the expense tool.
+Ruby leads the reliability working group.
+Theo manages the data warehouse.
+Mila is the accessibility lead.
+Jonas reviews all public API changes.

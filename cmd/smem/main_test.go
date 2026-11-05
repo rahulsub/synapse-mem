@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -84,6 +87,37 @@ func TestHookUsesTheSessionsDirectory(t *testing.T) {
 	hook("post-tool-use", `{"session_id":"s1","cwd":"`+proj+`","tool_name":"Bash","tool_input":{"command":"make test"}}`)
 	if spooled, _ := filepath.Glob(filepath.Join(proj, ".smem", "spool", "*.json")); len(spooled) != 1 {
 		t.Fatalf("post-tool-use spools in the session's store: %v", spooled)
+	}
+}
+
+func TestRecallJSONIsRepeatable(t *testing.T) {
+	t.Setenv("SMEM_DB", filepath.Join(t.TempDir(), "smem.db"))
+	t.Setenv("SMEM_CONFIG", filepath.Join(t.TempDir(), "none.json"))
+	t.Setenv("SMEM_KEY_DIR", filepath.Join(t.TempDir(), "keys"))
+	t.Setenv("SMEM_ACTOR", "tester")
+	var out bytes.Buffer
+	for _, c := range []string{"Staging outages do not page anyone", "Office espresso machine outages go to facilities", "The cafeteria menu changes weekly"} {
+		if err := run([]string{"remember", "--kind", "fact", c}, strings.NewReader(""), &out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recall := func() string {
+		var o bytes.Buffer
+		if err := run([]string{"recall", "--no-record", "--json", "staging database outages"}, strings.NewReader(""), &o); err != nil {
+			t.Fatal(err)
+		}
+		var hits []struct {
+			ID        string
+			Relevance float64
+		}
+		if err := json.Unmarshal(o.Bytes(), &hits); err != nil || len(hits) != 2 {
+			t.Fatalf("recall output (%v): %s", err, o.String())
+		}
+		sort.Slice(hits, func(i, j int) bool { return hits[i].ID < hits[j].ID })
+		return fmt.Sprint(hits)
+	}
+	if a, b := recall(), recall(); a != b {
+		t.Fatalf("two recalls differ:\n%s\n%s", a, b)
 	}
 }
 
