@@ -120,6 +120,14 @@ func Doctor(ctx context.Context, e *Engine, cfg *Config, cfgErr error, ping bool
 		add("trust", "ok", "%d key(s), all trusted or with nothing quarantined", len(ks))
 	}
 
+	if problems, err := e.checkSummaries(); err != nil {
+		add("summaries", "warn", "%v", err)
+	} else if len(problems) > 0 {
+		add("summaries", "warn", "%s; run `smem rebuild`", strings.Join(problems, "; "))
+	} else {
+		add("summaries", "ok", "read summaries match the log")
+	}
+
 	if n := e.SpoolBacklog(); n > 100 {
 		add("spool", "warn", "%d tool calls waiting; nothing has written to the store for a while", n)
 	} else {

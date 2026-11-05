@@ -112,6 +112,34 @@ CREATE TABLE IF NOT EXISTS judge_runs (
 CREATE INDEX IF NOT EXISTS judge_runs_judge ON judge_runs(replica, judge, at);
 `
 
+// summarySchema holds local caches derived from events: the idle gaps of the
+// active decay clock and per-key event counts. Rebuild reconstructs them. They
+// are never replicated or signed, and nothing but speed depends on them.
+const summarySchema = `
+CREATE TABLE IF NOT EXISTS summary_state (
+	name    TEXT PRIMARY KEY,            -- 'key_events' or 'idle_gaps/<replica>/<idle_ms>'
+	version INTEGER NOT NULL,            -- summaryVersion that built it
+	seq     INTEGER NOT NULL DEFAULT 0,  -- key_events: events with seq <= this are counted
+	replica TEXT NOT NULL DEFAULT '',    -- idle_gaps: the replica it describes
+	idle_ms INTEGER NOT NULL DEFAULT 0,  -- idle_gaps: the threshold it was built with
+	rseq    INTEGER NOT NULL DEFAULT 0,  -- idle_gaps: events of replica with rseq <= this are included
+	last_at INTEGER NOT NULL DEFAULT 0   -- idle_gaps: the time of the event at rseq
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS summary_idle_gaps (
+	replica  TEXT NOT NULL,
+	idle_ms  INTEGER NOT NULL,
+	ord      INTEGER NOT NULL,           -- position among this state's gaps
+	start_at INTEGER NOT NULL,           -- the earlier event's time plus idle_ms
+	end_at   INTEGER NOT NULL,           -- the later event's time
+	PRIMARY KEY (replica, idle_ms, ord)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS summary_key_events (
+	key_id TEXT PRIMARY KEY,
+	events INTEGER NOT NULL,             -- every event signed by the key
+	regs   INTEGER NOT NULL              -- of which registrations
+) WITHOUT ROWID;
+`
+
 // migrations bring an existing database up to the current base schema.
 // Views need none: a changed view schema is applied by rebuilding.
 var migrations = []struct{ table, column, ddl string }{

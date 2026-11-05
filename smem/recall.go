@@ -343,20 +343,27 @@ func activeHours(ref, at int64, gaps [][2]int64) float64 {
 	return hoursSince(at+elapsed, at)
 }
 
-// gapCache holds the idle stretches of this replica's history.
+// gapCache holds the idle stretches of this replica's history up to head, the
+// time of the event at head and what it was built for.
 type gapCache struct {
-	mu   sync.Mutex
-	head int64
-	gaps [][2]int64
+	mu      sync.Mutex
+	replica string
+	idleMs  int64
+	head    int64
+	last    int64
+	gaps    [][2]int64
 }
 
 // idleGaps returns the intervals that don't count on the active clock: for
 // each stretch with no local events longer than decay.idle_after, the part
 // beyond idle_after, including the current one up to now. Only this
 // replica's own events count as activity.
+//
+// A fresh process starts from the persisted summary and reads only the local
+// events past it. Without a usable summary that is the whole local history.
 func (e *Engine) idleGaps(now int64) ([][2]int64, error) {
-	idle := e.Policy.Decay.IdleAfter.D().Milliseconds()
-	if e.Policy.Decay.Clock == "wall" || idle <= 0 {
+	idle := e.gapIdle()
+	if idle <= 0 {
 		return nil, nil
 	}
 	var head sql.NullInt64
@@ -368,30 +375,36 @@ func (e *Engine) idleGaps(now int64) ([][2]int64, error) {
 	}
 	e.gaps.mu.Lock()
 	defer e.gaps.mu.Unlock()
-	if e.gaps.head != head.Int64 {
-		// Extend from where the cache left off: only new events are read.
-		ats, err := selectAll(e.db, func(s scanner) (int64, error) {
+	g := &e.gaps
+	if g.replica != e.replica || g.idleMs != idle || g.head > head.Int64 {
+		base := e.loadGapBase(idle)
+		if base.rseq > head.Int64 {
+			base = gapBase{}
+		}
+		g.replica, g.idleMs, g.head, g.last, g.gaps = e.replica, idle, base.rseq, base.lastAt, base.gaps
+	}
+	if g.head != head.Int64 {
+		rows, err := e.db.Query(qGapDelta, e.replica, g.head, head.Int64)
+		ats, err := queryAll(rows, err, func(s scanner) (int64, error) {
 			var at int64
 			return at, s.Scan(&at)
-		}, `SELECT at FROM events WHERE replica = ? AND rseq > ? ORDER BY rseq`, e.replica, e.gaps.head)
+		})
 		if err != nil {
 			return nil, err
 		}
-		gaps, prev := e.gaps.gaps, int64(0)
-		if n := len(gaps); n > 0 {
-			gaps, prev = gaps[:n-1], gaps[n-1][0]
-		}
+		summaryRows.Add(int64(len(ats)))
+		gaps, prev := g.gaps, g.last
 		for _, at := range ats {
 			if prev != 0 && at-prev > idle {
 				gaps = append(gaps, [2]int64{prev + idle, at})
 			}
 			prev = at
 		}
-		e.gaps.head, e.gaps.gaps = head.Int64, append(gaps, [2]int64{prev, 0})
+		g.head, g.last, g.gaps = head.Int64, prev, gaps
 	}
-	gaps := e.gaps.gaps[:len(e.gaps.gaps)-1]
-	if last := e.gaps.gaps[len(e.gaps.gaps)-1][0]; now-last > idle {
-		gaps = append(slices.Clip(gaps), [2]int64{last + idle, now})
+	gaps := g.gaps
+	if now-g.last > idle {
+		gaps = append(slices.Clip(gaps), [2]int64{g.last + idle, now})
 	}
 	return gaps, nil
 }

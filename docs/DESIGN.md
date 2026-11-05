@@ -47,6 +47,32 @@ place in the design (§9) but none is needed to get the guarantees above.
   itself never decays.** Memories can fade from recall; the record of what
   happened is permanent.
 
+### Read summaries
+
+Two reads would otherwise grow with the log. A fresh process on the active
+decay clock derived the idle gaps from every local event, and the quarantine
+count and the per-key event counts were counts over every event. Both are
+kept as local summaries in `summary_state`, `summary_idle_gaps` and
+`summary_key_events`.
+
+* A summary is a watermark and the totals up to it. A read adds the events
+  past the watermark, which is an index range, and every write transaction
+  advances the watermark over the events it inserted. Key counts use the
+  local insertion order (`events.seq`); idle gaps use the local replica's own
+  `rseq`.
+* Key counts don't depend on trust, so a trust change needs no recomputation:
+  the join with `key_trust` happens at read time.
+* Summaries are not projections and are never signed or replicated. One that
+  is missing, behind or from another `summaryVersion` is still read exactly
+  through the log, at the old cost, and the next write repairs it. A writer
+  from before summaries existed only leaves the watermarks behind.
+* A refresh that fails is undone and ignored, so an audit write never depends
+  on a cache. `smem rebuild` reconstructs the summaries and `smem doctor`
+  compares them with the log.
+
+`smem stats`, the per-type counts in `smem doctor` and its summary check read
+the whole log by design: they are diagnostics.
+
 ### Event
 
 ```
@@ -637,6 +663,10 @@ Known costs as the store grows:
   heads it covers) that lets old segments be archived off the hot database
   while staying verifiable. It's not built yet; `smem stats` shows the
   growth rate.
+* **Read cost against actions.** Fixed memories with a growing action history
+  should read in constant time. `SMEM_BENCH=1 go test ./smem -run
+  TestReadCostVsActions -v` measures recall, context and review at 0, 1k and
+  10k actions, in process and (with `SMEM_BENCH_BIN`) through the built binary.
 * Session context scores every memory (linear). Past ~100k memories,
   pre-filter candidates by a maintained last-access column.
 * Sync re-reads whole feed files; track per-feed offsets for large logs.
@@ -684,6 +714,7 @@ Known costs as the store grows:
 | `smem/review.go` | Suspect, at-risk, conflicts, untrusted keys |
 | `smem/why.go` | Traces and their text rendering |
 | `smem/verify.go` | Verification, heads, rebuild |
+| `smem/summary.go` | Read summaries: idle gaps and per-key event counts |
 | `smem/sync.go` | Import, export, directory remote |
 | `smem/hook.go` | Hook capture, spool, decision linking, process-tied sessions |
 | `smem/doctor.go` | `doctor`, `stats`, judge ping |

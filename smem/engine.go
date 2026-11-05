@@ -145,7 +145,7 @@ func (e *Engine) setup() error {
 			}
 		}
 	}
-	if _, err := e.db.Exec(viewsSchema + rulesSchema); err != nil {
+	if _, err := e.db.Exec(viewsSchema + rulesSchema + summarySchema); err != nil {
 		return fmt.Errorf("schema: %w", err)
 	}
 	// Two processes opening a new store at once must agree on one id, so
@@ -285,6 +285,10 @@ func (e *Engine) write(fn func(*wtx) error) ([]Event, error) {
 	}
 	w := &wtx{e: e, tx: tx}
 	if err := fn(w); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if err := e.refreshSafely(tx); err != nil {
 		tx.Rollback()
 		return nil, err
 	}

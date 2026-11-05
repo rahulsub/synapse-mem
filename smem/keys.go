@@ -114,6 +114,9 @@ type Key struct {
 
 // Keys lists every key that has signed events in this database.
 func (e *Engine) Keys() ([]Key, error) {
+	if out, ok := e.summarizedKeys(); ok {
+		return out, nil
+	}
 	rows, err := e.db.Query(`SELECT k.key_id, k.actor, k.replica, COALESCE(t.trusted, 0),
 		(SELECT COUNT(*) FROM events ev WHERE ev.key_id = k.key_id)
 		FROM keys k LEFT JOIN key_trust t ON t.key_id = k.key_id ORDER BY k.actor, k.key_id`)
@@ -173,6 +176,9 @@ func (e *Engine) setTrust(decisions map[string]bool, note string) error {
 
 // Quarantined counts events held back because their key is not trusted.
 func (e *Engine) Quarantined() (int, error) {
+	if n, ok := e.summarizedQuarantined(); ok {
+		return n, nil
+	}
 	var n int
 	err := e.db.QueryRow(`SELECT COUNT(*) FROM events ev WHERE ev.type != ? AND NOT EXISTS
 		(SELECT 1 FROM key_trust t WHERE t.key_id = ev.key_id AND t.trusted = 1)`, evKeyRegistered).Scan(&n)

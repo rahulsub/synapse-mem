@@ -115,9 +115,18 @@ func (e *Engine) Events(subject, typ string, limit int) ([]Event, error) {
 	return e.loadEvents(q+` ORDER BY at DESC, replica, rseq DESC LIMIT ?`, append(args, limit)...)
 }
 
-// Rebuild drops every projection and replays the log.
+// Rebuild drops every projection and replays the log, then rebuilds the
+// summaries from scratch. A summary that can't be rebuilt fails the rebuild.
 func (e *Engine) Rebuild() error {
-	_, err := e.write(func(w *wtx) error { return rebuildViews(w.tx) })
+	_, err := e.write(func(w *wtx) error {
+		if err := rebuildViews(w.tx); err != nil {
+			return err
+		}
+		if err := resetSummaries(w.tx); err != nil {
+			return err
+		}
+		return refreshSummaries(w.tx, e.replica, e.gapIdle())
+	})
 	return err
 }
 
